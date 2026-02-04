@@ -29,3 +29,8 @@ jobs:
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
         run: |
           python main.py
+          - name: Push reports to GitHub
+  run: |
+    chmod +x push_reports.sh
+    ./push_reports.sh
+
