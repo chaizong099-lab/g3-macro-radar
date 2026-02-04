@@ -210,7 +210,27 @@ def run_engine():
 """
 
     send_wechat("📡 G3 宏观雷达日报", full_msg)
+    export_dashboard_data(li, ri, state, trans_prob, PORTFOLIO_TEMPLATE[state])
 
 # ========== 程序入口 ==========
 if __name__ == "__main__":
     run_engine()
+    import json
+from pathlib import Path
+from datetime import datetime
+
+def export_dashboard_data(li, ri, state, prob, portfolio):
+    Path("reports").mkdir(exist_ok=True)
+
+    payload = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "li": round(float(li), 4),
+        "ri": round(float(ri), 4),
+        "state": state,
+        "transition_probability": round(float(prob), 2),
+        "portfolio": portfolio
+    }
+
+    with open("reports/latest.json", "w") as f:
+        json.dump(payload, f, indent=2)
+
