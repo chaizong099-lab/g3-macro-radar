@@ -1,25 +1,29 @@
 # ===============================
-# G3 宏观资金雷达系统 - 生产版
+# G3 宏观资金雷达系统 - 生产最终版
+# ===============================
 # 支持：
 # - 宏观状态识别 S1-S4
 # - AI策略解读（OpenAI API）
-# - 图表生成 + 图床上传
+# - 图表生成
 # - CSV导出
 # - 周报PDF生成
 # - 多微信(Server酱 Turbo)推送
 # - GitHub Actions 定时运行
+# - GitHub Pages Web Dashboard 自动更新
 # ===============================
 
 import os
 import io
+import json
 import requests
 import datetime
+from pathlib import Path
+
 import yfinance as yf
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-from sklearn.preprocessing import StandardScaler
 from fredapi import Fred
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
@@ -31,10 +35,24 @@ OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 SERVER_KEYS = os.getenv("SERVERCHAN_KEYS")  # 多个用逗号分隔
 FRED_KEY = os.getenv("FRED_API_KEY")
 
+if not OPENAI_KEY:
+    raise RuntimeError("❌ 缺少 OPENAI_API_KEY")
+if not SERVER_KEYS:
+    raise RuntimeError("❌ 缺少 SERVERCHAN_KEYS")
+if not FRED_KEY:
+    raise RuntimeError("❌ 缺少 FRED_API_KEY")
+
 client = OpenAI(api_key=OPENAI_KEY)
 fred = Fred(api_key=FRED_KEY)
 
-# ========== 参数 ==========
+# ========== 目录 ==========
+OUTPUT_DIR = Path("outputs")
+WEB_DIR = Path("docs/data")
+
+OUTPUT_DIR.mkdir(exist_ok=True)
+WEB_DIR.mkdir(parents=True, exist_ok=True)
+
+# ========== 仓位模板 ==========
 PORTFOLIO_TEMPLATE = {
     "S1": {"Stocks": "60%", "BTC": "20%", "Gold": "10%", "Cash": "10%"},
     "S2": {"Stocks": "40%", "BTC": "20%", "Gold": "20%", "Cash": "20%"},
@@ -42,11 +60,10 @@ PORTFOLIO_TEMPLATE = {
     "S4": {"Stocks": "0%", "BTC": "0%", "Gold": "40%", "Cash": "60%"},
 }
 
-DATA_DIR = "outputs"
-os.makedirs(DATA_DIR, exist_ok=True)
-
 # ========== 数据获取 ==========
 def get_market_data():
+    print("📥 拉取市场数据...")
+
     sp500 = yf.download("^GSPC", period="6mo", interval="1d")[["Close"]]
     btc = yf.download("BTC-USD", period="6mo", interval="1d")[["Close"]]
     gold = yf.download("GC=F", period="6mo", interval="1d")[["Close"]]
@@ -54,18 +71,15 @@ def get_market_data():
     dxy = fred.get_series("DTWEXBGS")
     rates = fred.get_series("DFF")
 
-    # 转成带时间索引的 DataFrame
     dxy = pd.DataFrame(dxy, columns=["Close"])
     rates = pd.DataFrame(rates, columns=["Close"])
 
-    # 统一列名
     sp500.columns = ["SP500"]
     btc.columns = ["BTC"]
     gold.columns = ["GOLD"]
     dxy.columns = ["DXY"]
     rates.columns = ["RATES"]
 
-    # 按日期对齐（量化标准做法）
     df = pd.concat(
         [sp500, btc, gold, dxy, rates],
         axis=1,
@@ -81,7 +95,7 @@ def compute_indices(df):
     li = returns["GOLD"].mean() - returns["DXY"].mean()
     ri = returns["BTC"].std() + returns["SP500"].std()
 
-    return round(li, 3), round(ri, 3)
+    return round(float(li), 4), round(float(ri), 4)
 
 # ========== 状态判断 ==========
 def classify_state(li, ri):
@@ -101,28 +115,28 @@ def transition_probability(li, ri):
 
 # ========== 图表 ==========
 def generate_chart(df):
-    path = os.path.join(DATA_DIR, "market_chart.png")
+    path = OUTPUT_DIR / "market_chart.png"
 
     df[["SP500", "BTC", "GOLD"]].tail(60).plot(figsize=(10, 5))
-    plt.title("Market Trend - 60 Days")
+    plt.title("Market Trend - Last 60 Days")
     plt.grid(True)
     plt.savefig(path)
     plt.close()
 
-    return path
+    return str(path)
 
-# ========== CSV导出 ==========
+# ========== CSV ==========
 def export_csv(df):
-    path = os.path.join(DATA_DIR, "market_data.csv")
+    path = OUTPUT_DIR / "market_data.csv"
     df.to_csv(path)
-    return path
+    return str(path)
 
-# ========== 周报PDF ==========
+# ========== PDF ==========
 def generate_pdf(report_text):
-    path = os.path.join(DATA_DIR, "weekly_report.pdf")
+    path = OUTPUT_DIR / "weekly_report.pdf"
 
     styles = getSampleStyleSheet()
-    pdf = SimpleDocTemplate(path)
+    pdf = SimpleDocTemplate(str(path))
 
     elements = []
     for line in report_text.split("\n"):
@@ -130,10 +144,12 @@ def generate_pdf(report_text):
         elements.append(Spacer(1, 12))
 
     pdf.build(elements)
-    return path
+    return str(path)
 
 # ========== AI解读 ==========
 def ai_macro_analysis(raw_data):
+    print("🤖 请求AI分析中...")
+
     prompt = f"""
 你是华尔街宏观策略师，请解读以下市场数据并给出专业投资建议：
 
@@ -151,7 +167,7 @@ def ai_macro_analysis(raw_data):
         messages=[{"role": "user", "content": prompt}]
     )
 
-    return response.choices[0].message.content
+    return response.choices[0].message.content.strip()
 
 # ========== 微信推送 ==========
 def send_wechat(title, content):
@@ -163,14 +179,33 @@ def send_wechat(title, content):
             "title": title,
             "desp": content
         }
-        r = requests.post(url, data=data)
-        print("📨 微信状态:", r.status_code, r.text)
+        r = requests.post(url, data=data, timeout=15)
+        print("📨 微信状态:", r.status_code)
+
+# ========== Web Dashboard导出 ==========
+def export_dashboard_data(li, ri, state, prob, portfolio, summary):
+    payload = {
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "li": round(li, 4),
+        "ri": round(ri, 4),
+        "state": state,
+        "transition": round(prob, 2),
+        "portfolio": portfolio,
+        "summary": summary
+    }
+
+    path = WEB_DIR / "latest.json"
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    print("🌐 Dashboard 数据已导出:", path)
 
 # ========== 主引擎 ==========
 def run_engine():
-    print("📡 正在运行宏观雷达系统...")
+    print("📡 G3 宏观雷达系统启动")
 
     df = get_market_data()
+
     li, ri = compute_indices(df)
     state = classify_state(li, ri)
     prob = transition_probability(li, ri)
@@ -179,7 +214,7 @@ def run_engine():
     csv_file = export_csv(df)
 
     raw_report = f"""
-时间: {datetime.datetime.utcnow()}
+时间: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC
 
 状态: {state}
 流动性指数 LI: {li}
@@ -190,47 +225,36 @@ def run_engine():
 {PORTFOLIO_TEMPLATE[state]}
 """
 
-    print("🤖 请求AI分析中...")
     ai_text = ai_macro_analysis(raw_report)
-
     pdf_path = generate_pdf(ai_text)
 
     full_msg = f"""
-📊 G3 宏观资金雷达
+📊 G3 宏观资金雷达日报
 
 {raw_report}
 
 🧠 AI策略解读:
 {ai_text}
 
-📎 附件:
+📎 本地文件:
 图表: {chart}
 数据: {csv_file}
 周报PDF: {pdf_path}
 """
 
     send_wechat("📡 G3 宏观雷达日报", full_msg)
-    export_dashboard_data(li, ri, state, trans_prob, PORTFOLIO_TEMPLATE[state])
+
+    export_dashboard_data(
+        li,
+        ri,
+        state,
+        prob,
+        PORTFOLIO_TEMPLATE[state],
+        ai_text
+    )
+
+    print("✅ 系统运行完成")
 
 # ========== 程序入口 ==========
 if __name__ == "__main__":
     run_engine()
-    import json
-from pathlib import Path
-from datetime import datetime
-
-def export_dashboard_data(li, ri, state, prob, portfolio):
-    Path("reports").mkdir(exist_ok=True)
-
-    payload = {
-        "timestamp": datetime.utcnow().isoformat(),
-        "li": round(float(li), 4),
-        "ri": round(float(ri), 4),
-        "state": state,
-        "transition_probability": round(float(prob), 2),
-        "portfolio": portfolio
-    }
-
-    with open("reports/latest.json", "w") as f:
-        json.dump(payload, f, indent=2)
-
