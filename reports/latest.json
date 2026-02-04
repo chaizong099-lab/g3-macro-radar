@@ -1,0 +1,13 @@
+{
+  "timestamp": "2026-02-04T09:44:14.222010",
+  "li": 0.0031,
+  "ri": 0.032,
+  "state": "S4",
+  "transition_probability": 1.47,
+  "portfolio": {
+    "Stocks": "0%",
+    "BTC": "0%",
+    "Gold": "40%",
+    "Cash": "60%"
+  }
+}
