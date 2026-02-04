@@ -50,14 +50,15 @@ def get_market_data():
     sp500 = yf.download("^GSPC", period="6mo", interval="1d")["Close"]
     btc = yf.download("BTC-USD", period="6mo", interval="1d")["Close"]
     gold = yf.download("GC=F", period="6mo", interval="1d")["Close"]
-
     dxy = fred.get_series("DTWEXBGS")
     rates = fred.get_series("DFF")
-sp500 = sp500.values.flatten()
-btc = btc.values.flatten()
-gold = gold.values.flatten()
-dxy = dxy.values.flatten()
-rates = rates.values.flatten()
+
+    sp500 = sp500.values.flatten()
+    btc = btc.values.flatten()
+    gold = gold.values.flatten()
+    dxy = dxy.values.flatten()
+    rates = rates.values.flatten()
+
     df = pd.DataFrame({
         "SP500": sp500,
         "BTC": btc,
