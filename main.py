@@ -47,25 +47,30 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 # ========== 数据获取 ==========
 def get_market_data():
-    sp500 = yf.download("^GSPC", period="6mo", interval="1d")["Close"]
-    btc = yf.download("BTC-USD", period="6mo", interval="1d")["Close"]
-    gold = yf.download("GC=F", period="6mo", interval="1d")["Close"]
+    sp500 = yf.download("^GSPC", period="6mo", interval="1d")[["Close"]]
+    btc = yf.download("BTC-USD", period="6mo", interval="1d")[["Close"]]
+    gold = yf.download("GC=F", period="6mo", interval="1d")[["Close"]]
+
     dxy = fred.get_series("DTWEXBGS")
     rates = fred.get_series("DFF")
 
-    sp500 = sp500.values.flatten()
-    btc = btc.values.flatten()
-    gold = gold.values.flatten()
-    dxy = dxy.values.flatten()
-    rates = rates.values.flatten()
+    # 转成带时间索引的 DataFrame
+    dxy = pd.DataFrame(dxy, columns=["Close"])
+    rates = pd.DataFrame(rates, columns=["Close"])
 
-    df = pd.DataFrame({
-        "SP500": sp500,
-        "BTC": btc,
-        "GOLD": gold,
-        "DXY": dxy,
-        "RATES": rates
-    }).dropna()
+    # 统一列名
+    sp500.columns = ["SP500"]
+    btc.columns = ["BTC"]
+    gold.columns = ["GOLD"]
+    dxy.columns = ["DXY"]
+    rates.columns = ["RATES"]
+
+    # 按日期对齐（量化标准做法）
+    df = pd.concat(
+        [sp500, btc, gold, dxy, rates],
+        axis=1,
+        join="inner"
+    ).dropna()
 
     return df
 
