@@ -1,15 +1,5 @@
 # ===============================
-# G3 宏观资金雷达系统 - 生产最终版
-# ===============================
-# 支持：
-# - 宏观状态识别 S1-S4
-# - AI策略解读（OpenAI API）
-# - 图表生成
-# - CSV导出
-# - 周报PDF生成
-# - 多微信(Server酱 Turbo)推送
-# - GitHub Actions 定时运行
-# - GitHub Pages Web Dashboard 自动更新
+# G3 宏观资金雷达系统 - 生产版 FINAL
 # ===============================
 
 import os
@@ -32,27 +22,18 @@ from openai import OpenAI
 
 # ========== 环境变量 ==========
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
-SERVER_KEYS = os.getenv("SERVERCHAN_KEYS")  # 多个用逗号分隔
+SERVER_KEYS = os.getenv("SERVERCHAN_KEYS")
 FRED_KEY = os.getenv("FRED_API_KEY")
 
-if not OPENAI_KEY:
-    raise RuntimeError("❌ 缺少 OPENAI_API_KEY")
-if not SERVER_KEYS:
-    raise RuntimeError("❌ 缺少 SERVERCHAN_KEYS")
-if not FRED_KEY:
-    raise RuntimeError("❌ 缺少 FRED_API_KEY")
+print("🔑 ENV CHECK")
+print("OPENAI:", "OK" if OPENAI_KEY else "MISSING")
+print("SERVERCHAN:", "OK" if SERVER_KEYS else "MISSING")
+print("FRED:", "OK" if FRED_KEY else "MISSING")
 
 client = OpenAI(api_key=OPENAI_KEY)
 fred = Fred(api_key=FRED_KEY)
 
-# ========== 目录 ==========
-OUTPUT_DIR = Path("outputs")
-WEB_DIR = Path("docs/data")
-
-OUTPUT_DIR.mkdir(exist_ok=True)
-WEB_DIR.mkdir(parents=True, exist_ok=True)
-
-# ========== 仓位模板 ==========
+# ========== 参数 ==========
 PORTFOLIO_TEMPLATE = {
     "S1": {"Stocks": "60%", "BTC": "20%", "Gold": "10%", "Cash": "10%"},
     "S2": {"Stocks": "40%", "BTC": "20%", "Gold": "20%", "Cash": "20%"},
@@ -60,10 +41,12 @@ PORTFOLIO_TEMPLATE = {
     "S4": {"Stocks": "0%", "BTC": "0%", "Gold": "40%", "Cash": "60%"},
 }
 
+DATA_DIR = "outputs"
+Path(DATA_DIR).mkdir(exist_ok=True)
+Path("docs").mkdir(exist_ok=True)
+
 # ========== 数据获取 ==========
 def get_market_data():
-    print("📥 拉取市场数据...")
-
     sp500 = yf.download("^GSPC", period="6mo", interval="1d")[["Close"]]
     btc = yf.download("BTC-USD", period="6mo", interval="1d")[["Close"]]
     gold = yf.download("GC=F", period="6mo", interval="1d")[["Close"]]
@@ -91,10 +74,8 @@ def get_market_data():
 # ========== 指数计算 ==========
 def compute_indices(df):
     returns = df.pct_change().dropna()
-
     li = returns["GOLD"].mean() - returns["DXY"].mean()
     ri = returns["BTC"].std() + returns["SP500"].std()
-
     return round(float(li), 4), round(float(ri), 4)
 
 # ========== 状态判断 ==========
@@ -115,28 +96,25 @@ def transition_probability(li, ri):
 
 # ========== 图表 ==========
 def generate_chart(df):
-    path = OUTPUT_DIR / "market_chart.png"
-
+    path = os.path.join(DATA_DIR, "market_chart.png")
     df[["SP500", "BTC", "GOLD"]].tail(60).plot(figsize=(10, 5))
-    plt.title("Market Trend - Last 60 Days")
+    plt.title("Market Trend - 60 Days")
     plt.grid(True)
     plt.savefig(path)
     plt.close()
-
-    return str(path)
+    return path
 
 # ========== CSV ==========
 def export_csv(df):
-    path = OUTPUT_DIR / "market_data.csv"
+    path = os.path.join(DATA_DIR, "market_data.csv")
     df.to_csv(path)
-    return str(path)
+    return path
 
 # ========== PDF ==========
 def generate_pdf(report_text):
-    path = OUTPUT_DIR / "weekly_report.pdf"
-
+    path = os.path.join(DATA_DIR, "weekly_report.pdf")
     styles = getSampleStyleSheet()
-    pdf = SimpleDocTemplate(str(path))
+    pdf = SimpleDocTemplate(path)
 
     elements = []
     for line in report_text.split("\n"):
@@ -144,12 +122,10 @@ def generate_pdf(report_text):
         elements.append(Spacer(1, 12))
 
     pdf.build(elements)
-    return str(path)
+    return path
 
-# ========== AI解读 ==========
+# ========== AI ==========
 def ai_macro_analysis(raw_data):
-    print("🤖 请求AI分析中...")
-
     prompt = f"""
 你是华尔街宏观策略师，请解读以下市场数据并给出专业投资建议：
 
@@ -161,51 +137,46 @@ def ai_macro_analysis(raw_data):
 3. 黄金 / 美股 / 加密货币策略
 4. 未来7天关键观察点
 """
-
     response = client.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}]
     )
+    return response.choices[0].message.content
 
-    return response.choices[0].message.content.strip()
-
-# ========== 微信推送 ==========
+# ========== 微信 ==========
 def send_wechat(title, content):
-    keys = SERVER_KEYS.split(",")
+    if not SERVER_KEYS:
+        print("⚠️ SERVERCHAN_KEYS missing, skip WeChat push")
+        return
 
+    keys = SERVER_KEYS.split(",")
     for key in keys:
         url = f"https://sctapi.ftqq.com/{key.strip()}.send"
-        data = {
-            "title": title,
-            "desp": content
-        }
-        r = requests.post(url, data=data, timeout=15)
-        print("📨 微信状态:", r.status_code)
+        data = {"title": title, "desp": content}
+        r = requests.post(url, data=data, timeout=10)
+        print("📨 微信:", r.status_code)
 
-# ========== Web Dashboard导出 ==========
-def export_dashboard_data(li, ri, state, prob, portfolio, summary):
+# ========== Web 仪表盘 ==========
+def export_dashboard_data(li, ri, state, prob, portfolio):
     payload = {
         "timestamp": datetime.datetime.utcnow().isoformat(),
-        "li": round(li, 4),
-        "ri": round(ri, 4),
+        "li": li,
+        "ri": ri,
         "state": state,
-        "transition": round(prob, 2),
-        "portfolio": portfolio,
-        "summary": summary
+        "transition_probability": prob,
+        "portfolio": portfolio
     }
 
-    path = WEB_DIR / "latest.json"
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
+    with open("docs/latest.json", "w") as f:
+        json.dump(payload, f, indent=2)
 
-    print("🌐 Dashboard 数据已导出:", path)
+    print("🌐 Web dashboard updated")
 
 # ========== 主引擎 ==========
 def run_engine():
-    print("📡 G3 宏观雷达系统启动")
+    print("📡 G3 Macro Radar Running...")
 
     df = get_market_data()
-
     li, ri = compute_indices(df)
     state = classify_state(li, ri)
     prob = transition_probability(li, ri)
@@ -214,7 +185,7 @@ def run_engine():
     csv_file = export_csv(df)
 
     raw_report = f"""
-时间: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC
+时间: {datetime.datetime.utcnow()}
 
 状态: {state}
 流动性指数 LI: {li}
@@ -225,36 +196,27 @@ def run_engine():
 {PORTFOLIO_TEMPLATE[state]}
 """
 
+    print("🤖 AI analyzing...")
     ai_text = ai_macro_analysis(raw_report)
     pdf_path = generate_pdf(ai_text)
 
     full_msg = f"""
-📊 G3 宏观资金雷达日报
+📊 G3 宏观资金雷达
 
 {raw_report}
 
 🧠 AI策略解读:
 {ai_text}
 
-📎 本地文件:
+📎 附件:
 图表: {chart}
 数据: {csv_file}
 周报PDF: {pdf_path}
 """
 
     send_wechat("📡 G3 宏观雷达日报", full_msg)
+    export_dashboard_data(li, ri, state, prob, PORTFOLIO_TEMPLATE[state])
 
-    export_dashboard_data(
-        li,
-        ri,
-        state,
-        prob,
-        PORTFOLIO_TEMPLATE[state],
-        ai_text
-    )
-
-    print("✅ 系统运行完成")
-
-# ========== 程序入口 ==========
+# ========== 入口 ==========
 if __name__ == "__main__":
     run_engine()
