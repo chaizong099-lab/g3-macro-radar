@@ -11,18 +11,22 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1️⃣ 拉代码
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      # 2️⃣ Python 环境
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      # 3️⃣ 安装依赖
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
 
+      # 4️⃣ 运行宏观引擎
       - name: Run Macro Engine
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -32,15 +36,13 @@ jobs:
         run: |
           python main.py
 
-      # ===========================
-      # 发布 Web 仪表盘数据
-      # ===========================
-      - name: Deploy to GitHub Pages
+      # 5️⃣ 准备 Web 仪表盘文件（不再生成 index.html）
+      - name: Prepare Web Dashboard
         run: |
           mkdir -p public
           cp -r reports public/
-          echo "<h2>G3 Macro Radar</h2><p>Data auto-updated daily</p>" > public/index.html
 
+      # 6️⃣ 发布到 GitHub Pages
       - name: Publish Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
