@@ -1,0 +1,9 @@
+yfinance
+fredapi
+pandas
+numpy
+matplotlib
+scikit-learn
+requests
+openai
+reportlab
