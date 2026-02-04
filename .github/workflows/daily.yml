@@ -1,0 +1,48 @@
+name: G3 Macro Radar Daily
+
+on:
+  schedule:
+    # UTC 02:00 = 北京时间 10:00
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run Macro Engine
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          SERVERCHAN_KEYS: ${{ secrets.SERVERCHAN_KEYS }}
+          IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}
+        run: |
+          python main.py
+
+      # ===========================
+      # 发布 Web 仪表盘数据
+      # ===========================
+      - name: Deploy to GitHub Pages
+        run: |
+          mkdir -p public
+          cp -r reports public/
+          echo "<h2>G3 Macro Radar</h2><p>Data auto-updated daily</p>" > public/index.html
+
+      - name: Publish Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./public
