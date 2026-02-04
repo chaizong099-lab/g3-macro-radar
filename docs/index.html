@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>G3 Macro Radar</title>
+  <meta charset="utf-8">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: Arial; background: #0f172a; color: white; padding: 30px }
+    .card { background: #020617; padding: 20px; border-radius: 15px; margin-bottom: 20px }
+    h1 { font-size: 32px }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px }
+    .big { font-size: 26px; font-weight: bold }
+  </style>
+</head>
+<body>
+
+<h1>📡 G3 Macro Radar Dashboard</h1>
+
+<div class="grid">
+  <div class="card">LI<br><div id="li" class="big">--</div></div>
+  <div class="card">RI<br><div id="ri" class="big">--</div></div>
+  <div class="card">State<br><div id="state" class="big">--</div></div>
+  <div class="card">Transition %<br><div id="prob" class="big">--</div></div>
+</div>
+
+<div class="card">
+  <h2>Recommended Portfolio</h2>
+  <pre id="portfolio"></pre>
+</div>
+
+<div class="card">
+  <canvas id="chart"></canvas>
+</div>
+
+<script>
+async function loadData() {
+  const res = await fetch('../reports/latest.json');
+  const data = await res.json();
+
+  document.getElementById("li").innerText = data.li;
+  document.getElementById("ri").innerText = data.ri;
+  document.getElementById("state").innerText = data.state;
+  document.getElementById("prob").innerText = data.transition_probability + "%";
+  document.getElementById("portfolio").innerText = JSON.stringify(data.portfolio, null, 2);
+}
+
+loadData();
+</script>
+
+</body>
+</html>
