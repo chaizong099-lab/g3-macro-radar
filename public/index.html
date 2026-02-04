@@ -65,6 +65,15 @@
       color: #64748b;
       font-size: 12px;
     }
+    .debug {
+      margin-top: 20px;
+      padding: 10px;
+      background: #020617;
+      border-radius: 10px;
+      color: #94a3b8;
+      font-size: 12px;
+      word-break: break-all;
+    }
   </style>
 </head>
 <body>
@@ -105,37 +114,76 @@
     Auto-updated daily via GitHub Actions · Powered by G3 Macro Engine
   </footer>
 
+  <div id="debug" class="debug">Loading data...</div>
+
   <script>
-    const DATA_URL = "./reports/latest.json";
+    let chartInstance = null;
+
+    function getBasePath() {
+      const parts = window.location.pathname.split("/");
+      if (parts.length > 2) {
+        return "/" + parts[1] + "/";
+      }
+      return "/";
+    }
+
+    const DATA_URL = getBasePath() + "reports/latest.json";
 
     async function loadData() {
+      const debugBox = document.getElementById("debug");
       try {
-        const res = await fetch(DATA_URL + "?t=" + Date.now());
+        const url = DATA_URL + "?t=" + Date.now();
+        debugBox.innerText = "Fetching: " + url;
+
+        const res = await fetch(url);
+        if (!res.ok) {
+          throw new Error("HTTP " + res.status + " " + res.statusText);
+        }
+
         const data = await res.json();
 
-        document.getElementById("state").innerText = data.state;
-        document.getElementById("li").innerText = data.li.toFixed(4);
-        document.getElementById("ri").innerText = data.ri.toFixed(4);
-        document.getElementById("prob").innerText = data.transition_probability + "%";
+        document.getElementById("state").innerText = data.state || "--";
+        document.getElementById("li").innerText = (data.li ?? 0).toFixed(4);
+        document.getElementById("ri").innerText = (data.ri ?? 0).toFixed(4);
+        document.getElementById("prob").innerText =
+          (data.transition_probability ?? "--") + "%";
 
         const ul = document.getElementById("portfolio");
         ul.innerHTML = "";
-        Object.entries(data.portfolio).forEach(([k, v]) => {
-          const li = document.createElement("li");
-          li.innerHTML = `<span>${k}</span><span>${v}</span>`;
-          ul.appendChild(li);
-        });
+        if (data.portfolio) {
+          Object.entries(data.portfolio).forEach(([k, v]) => {
+            const li = document.createElement("li");
+            li.innerHTML = `<span>${k}</span><span>${v}</span>`;
+            ul.appendChild(li);
+          });
+        }
 
-        renderChart(data.li, data.ri);
+        renderChart(data.li || 0, data.ri || 0);
+
+        debugBox.innerText =
+          "Last update: " +
+          (data.timestamp || "unknown") +
+          "\nPath: " +
+          DATA_URL;
       } catch (e) {
-        document.body.innerHTML = "<h2 style='text-align:center'>⚠️ Data not found. Run GitHub Actions first.</h2>";
+        debugBox.innerText =
+          "⚠️ Failed to load data\n" +
+          "Path tried: " +
+          DATA_URL +
+          "\nError: " +
+          e.message;
         console.error(e);
       }
     }
 
     function renderChart(li, ri) {
       const ctx = document.getElementById("radarChart").getContext("2d");
-      new Chart(ctx, {
+
+      if (chartInstance) {
+        chartInstance.destroy();
+      }
+
+      chartInstance = new Chart(ctx, {
         type: "radar",
         data: {
           labels: ["Liquidity", "Risk"],
@@ -146,23 +194,25 @@
               fill: true,
               backgroundColor: "rgba(56, 189, 248, 0.2)",
               borderColor: "rgba(56, 189, 248, 1)",
-              pointBackgroundColor: "rgba(56, 189, 248, 1)",
-            },
-          ],
+              pointBackgroundColor: "rgba(56, 189, 248, 1)"
+            }
+          ]
         },
         options: {
           scales: {
             r: {
               beginAtZero: true,
               max: 100,
-              ticks: { display: false },
-            },
-          },
-        },
+              ticks: { display: false }
+            }
+          }
+        }
       });
     }
 
     loadData();
+    setInterval(loadData, 60000); // 每分钟自动刷新
   </script>
 </body>
 </html>
+
