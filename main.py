@@ -7,6 +7,7 @@ import json
 import requests
 import datetime
 from pathlib import Path
+from datetime import date
 
 import yfinance as yf
 import pandas as pd
@@ -14,7 +15,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from fredapi import Fred
-from sklearn.preprocessing import StandardScaler
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
 from openai import OpenAI
@@ -30,19 +30,41 @@ client = OpenAI(api_key=OPENAI_KEY)
 fred = Fred(api_key=FRED_KEY)
 
 # ===============================
-# 参数
+# 目录
 # ===============================
 DATA_DIR = "outputs"
 REPORT_DIR = "reports"
 Path(DATA_DIR).mkdir(exist_ok=True)
 Path(REPORT_DIR).mkdir(exist_ok=True)
 
+# ===============================
+# 组合模板
+# ===============================
 PORTFOLIO_TEMPLATE = {
     "S1": {"Stocks": "60%", "BTC": "20%", "Gold": "10%", "Cash": "10%"},
     "S2": {"Stocks": "40%", "BTC": "20%", "Gold": "20%", "Cash": "20%"},
     "S3": {"Stocks": "20%", "BTC": "10%", "Gold": "30%", "Cash": "40%"},
     "S4": {"Stocks": "0%", "BTC": "0%", "Gold": "40%", "Cash": "60%"},
 }
+
+# ===============================
+# ✅ 推送保险（核心）
+# ===============================
+PUSH_FLAG_FILE = os.path.join(REPORT_DIR, "last_push_date.json")
+
+def already_pushed_today():
+    today = date.today().isoformat()
+    if not os.path.exists(PUSH_FLAG_FILE):
+        return False
+    try:
+        with open(PUSH_FLAG_FILE, "r", encoding="utf-8") as f:
+            return json.load(f).get("date") == today
+    except Exception:
+        return False
+
+def mark_pushed_today():
+    with open(PUSH_FLAG_FILE, "w", encoding="utf-8") as f:
+        json.dump({"date": date.today().isoformat()}, f, indent=2)
 
 # ===============================
 # 数据获取
@@ -56,16 +78,14 @@ def get_market_data():
     dxy = fred.get_series("DTWEXBGS")
     rates = fred.get_series("DFF")
 
-    dxy = pd.DataFrame(dxy, columns=["Close"])
-    rates = pd.DataFrame(rates, columns=["Close"])
+    df = pd.concat([
+        sp500.rename(columns={"Close": "SP500"}),
+        btc.rename(columns={"Close": "BTC"}),
+        gold.rename(columns={"Close": "GOLD"}),
+        pd.DataFrame(dxy, columns=["DXY"]),
+        pd.DataFrame(rates, columns=["RATES"])
+    ], axis=1).dropna()
 
-    sp500.columns = ["SP500"]
-    btc.columns = ["BTC"]
-    gold.columns = ["GOLD"]
-    dxy.columns = ["DXY"]
-    rates.columns = ["RATES"]
-
-    df = pd.concat([sp500, btc, gold, dxy, rates], axis=1, join="inner").dropna()
     return df
 
 # ===============================
@@ -73,10 +93,8 @@ def get_market_data():
 # ===============================
 def compute_indices(df):
     returns = df.pct_change().dropna()
-
     li = returns["GOLD"].mean() - returns["DXY"].mean()
     ri = returns["BTC"].std() + returns["SP500"].std()
-
     return round(float(li), 4), round(float(ri), 4)
 
 # ===============================
@@ -105,18 +123,16 @@ def transition_probability(li, ri):
 def generate_chart(df):
     print("📈 生成图表...")
     path = os.path.join(DATA_DIR, "market_chart.png")
-
     df[["SP500", "BTC", "GOLD"]].tail(60).plot(figsize=(10, 5))
     plt.title("G3 Macro Radar - 60 Days")
     plt.grid(True)
     plt.tight_layout()
     plt.savefig(path)
     plt.close()
-
     return path
 
 # ===============================
-# CSV导出
+# CSV
 # ===============================
 def export_csv(df):
     path = os.path.join(DATA_DIR, "market_data.csv")
@@ -124,28 +140,23 @@ def export_csv(df):
     return path
 
 # ===============================
-# PDF周报
+# PDF
 # ===============================
-def generate_pdf(report_text):
-    print("📄 生成PDF...")
+def generate_pdf(text):
     path = os.path.join(DATA_DIR, "weekly_report.pdf")
-
     styles = getSampleStyleSheet()
     pdf = SimpleDocTemplate(path)
-
     elements = []
-    for line in report_text.split("\n"):
+    for line in text.split("\n"):
         elements.append(Paragraph(line, styles["Normal"]))
-        elements.append(Spacer(1, 12))
-
+        elements.append(Spacer(1, 10))
     pdf.build(elements)
     return path
 
 # ===============================
-# Web仪表盘导出
+# Web 数据
 # ===============================
 def export_dashboard_data(li, ri, state, prob, portfolio):
-    print("🌍 生成Web数据...")
     payload = {
         "timestamp": datetime.datetime.utcnow().isoformat(),
         "li": li,
@@ -154,56 +165,33 @@ def export_dashboard_data(li, ri, state, prob, portfolio):
         "transition_probability": prob,
         "portfolio": portfolio
     }
-
-    path = os.path.join(REPORT_DIR, "latest.json")
-    with open(path, "w") as f:
+    with open(os.path.join(REPORT_DIR, "latest.json"), "w") as f:
         json.dump(payload, f, indent=2)
 
-    print(f"🌍 Web数据已生成: {path}")
-
 # ===============================
-# AI分析
+# AI 分析
 # ===============================
-def ai_macro_analysis(raw_data):
-    prompt = f"""
-你是全球宏观策略师，请根据系统数据给出专业投资解读：
-
-{raw_data}
-
-输出：
-1. 当前阶段判断
-2. 风险提示
-3. 黄金 / 美股 / 加密策略
-4. 未来7天观察点
-"""
-
+def ai_macro_analysis(raw):
     resp = client.responses.create(
         model="gpt-5",
-        input=prompt
+        input=f"你是宏观策略师，请解读以下数据：\n{raw}"
     )
-
     return resp.output_text.strip()
 
 # ===============================
 # 微信推送
 # ===============================
 def send_wechat(title, content):
-    print("🔔 推送微信...")
-    keys = SERVER_KEYS.split(",")
-
-    for key in keys:
-        key = key.strip()
-        if not key:
-            continue
-        url = f"https://sctapi.ftqq.com/{key}.send"
-        r = requests.post(url, data={"title": title, "desp": content}, timeout=10)
-        print("📨", key, r.status_code)
+    for key in SERVER_KEYS.split(","):
+        if key.strip():
+            url = f"https://sctapi.ftqq.com/{key.strip()}.send"
+            requests.post(url, data={"title": title, "desp": content}, timeout=10)
 
 # ===============================
 # 主引擎
 # ===============================
 def run_engine():
-    print("📡 正在运行宏观雷达系统...")
+    print("🚀 G3 Macro Radar 启动")
 
     df = get_market_data()
     li, ri = compute_indices(df)
@@ -216,38 +204,34 @@ def run_engine():
     raw_report = f"""
 时间: {datetime.datetime.utcnow()}
 状态: {state}
-
-流动性指数 LI: {li}
-风险指数 RI: {ri}
-转换概率: {prob}%
-
-推荐仓位:
-{PORTFOLIO_TEMPLATE[state]}
+LI: {li}
+RI: {ri}
+概率: {prob}%
+仓位: {PORTFOLIO_TEMPLATE[state]}
 """
 
-    print("🤖 请求AI分析中...")
     ai_text = ai_macro_analysis(raw_report)
+    pdf = generate_pdf(ai_text)
 
-    pdf_path = generate_pdf(ai_text)
+    # Web 永远更新
+    export_dashboard_data(li, ri, state, prob, PORTFOLIO_TEMPLATE[state])
 
-    full_msg = f"""
-📊 G3 宏观资金雷达
+    # 微信只推一次
+    if already_pushed_today():
+        print("✅ 今日已推送，跳过微信")
+        return
+
+    msg = f"""
+📡 G3 宏观雷达日报
 
 {raw_report}
 
 🧠 AI解读:
 {ai_text}
-
-📎 文件:
-图表: {chart}
-数据: {csv_file}
-周报PDF: {pdf_path}
 """
-
-    send_wechat("📡 G3 宏观雷达日报", full_msg)
-
-    # ===== Web仪表盘数据输出 =====
-    export_dashboard_data(li, ri, state, prob, PORTFOLIO_TEMPLATE[state])
+    send_wechat("📊 G3 宏观雷达", msg)
+    mark_pushed_today()
+    print("🔔 微信已推送")
 
 # ===============================
 # 入口
