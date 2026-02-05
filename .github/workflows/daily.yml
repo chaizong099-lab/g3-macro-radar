@@ -2,9 +2,8 @@ name: G3 Macro Radar Daily
 
 on:
   schedule:
-    - cron: "0 1 * * *"   # 09:00 北京
-    - cron: "0 2 * * *"   # 10:00 北京
-    - cron: "0 3 * * *"   # 11:00 北京
+    # UTC 02:00 = 北京时间 10:00
+    - cron: "0 2 * * *"
   workflow_dispatch:
 
 jobs:
