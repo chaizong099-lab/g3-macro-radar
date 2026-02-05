@@ -34,6 +34,8 @@ fred = Fred(api_key=FRED_KEY)
 # ===============================
 DATA_DIR = "outputs"
 REPORT_DIR = "reports"
+STATE_FILE = "state.json"   # ⭐ 新增：推送状态文件
+
 Path(DATA_DIR).mkdir(exist_ok=True)
 Path(REPORT_DIR).mkdir(exist_ok=True)
 
@@ -43,6 +45,28 @@ PORTFOLIO_TEMPLATE = {
     "S3": {"Stocks": "20%", "BTC": "10%", "Gold": "30%", "Cash": "40%"},
     "S4": {"Stocks": "0%", "BTC": "0%", "Gold": "40%", "Cash": "60%"},
 }
+
+# ===============================
+# 🔒 当天只推一次：工具函数
+# ===============================
+def today_str():
+    return datetime.date.today().isoformat()
+
+
+def already_sent_today():
+    if not os.path.exists(STATE_FILE):
+        return False
+    try:
+        with open(STATE_FILE, "r") as f:
+            state = json.load(f)
+        return state.get("last_sent") == today_str()
+    except Exception:
+        return False
+
+
+def mark_sent_today():
+    with open(STATE_FILE, "w") as f:
+        json.dump({"last_sent": today_str()}, f)
 
 # ===============================
 # 数据获取
@@ -205,6 +229,11 @@ def send_wechat(title, content):
 def run_engine():
     print("📡 正在运行宏观雷达系统...")
 
+    # 🔒 保险：当天已推送直接退出
+    if already_sent_today():
+        print("🛑 今日已推送，跳过执行")
+        return
+
     df = get_market_data()
     li, ri = compute_indices(df)
     state = classify_state(li, ri)
@@ -245,6 +274,9 @@ def run_engine():
 """
 
     send_wechat("📡 G3 宏观雷达日报", full_msg)
+
+    # ✅ 只有成功推送后才记录
+    mark_sent_today()
 
     # ===== Web仪表盘数据输出 =====
     export_dashboard_data(li, ri, state, prob, PORTFOLIO_TEMPLATE[state])
