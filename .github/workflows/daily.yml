@@ -1,36 +1,62 @@
 name: G3 Macro Radar Daily
 
+# ===============================
+# 触发条件
+# ===============================
 on:
+  # 定时任务：UTC 02:00 = 北京时间 10:00
   schedule:
-schedule:
-  - cron: "55 1 * * *"   # 09:55 北京
-  - cron: "0 2 * * *"    # 10:00 北京
-  - cron: "5 2 * * *"    # 10:05 北京
+    - cron: "0 2 * * *"
 
+  # 手动触发（方便你调试 / 补跑）
   workflow_dispatch:
+
+# ===============================
+# 权限（GitHub Pages 必需）
+# ===============================
+permissions:
+  contents: write
+
+# ===============================
+# 防止同一时间重复跑
+# ===============================
+concurrency:
+  group: g3-macro-radar-daily
+  cancel-in-progress: true
 
 jobs:
   build-and-deploy:
+    name: Run Engine & Deploy Dashboard
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ 拉代码
-      - name: Checkout repo
+      # ===========================
+      # 1️⃣ 拉取代码
+      # ===========================
+      - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ===========================
       # 2️⃣ Python 环境
-      - name: Setup Python
+      # ===========================
+      - name: Setup Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"     # pip 依赖缓存，加快构建
 
+      # ===========================
       # 3️⃣ 安装依赖
+      # ===========================
       - name: Install dependencies
         run: |
+          pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 4️⃣ 运行宏观引擎
-      - name: Run Macro Engine
+      # ===========================
+      # 4️⃣ 运行宏观雷达主程序
+      # ===========================
+      - name: Run G3 Macro Radar
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
@@ -39,14 +65,18 @@ jobs:
         run: |
           python main.py
 
-      # 5️⃣ 准备 Web 仪表盘文件（不再生成 index.html）
+      # ===========================
+      # 5️⃣ 准备 GitHub Pages 内容
+      # ===========================
       - name: Prepare Web Dashboard
         run: |
           mkdir -p public
           cp -r reports public/
 
+      # ===========================
       # 6️⃣ 发布到 GitHub Pages
-      - name: Publish Pages
+      # ===========================
+      - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
