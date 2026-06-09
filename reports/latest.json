@@ -1,7 +1,7 @@
 {
-  "timestamp_cn": "2026-06-08T14:51:13.401357+08:00",
-  "li": 0.0011,
-  "ri": 0.0377,
+  "timestamp_cn": "2026-06-09T14:14:13.113747+08:00",
+  "li": 0.0005,
+  "ri": 0.0385,
   "state": "S4",
   "transition_probability": 1.57,
   "portfolio": {
