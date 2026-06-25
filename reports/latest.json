@@ -1,9 +1,9 @@
 {
-  "timestamp_cn": "2026-06-24T14:12:00.967444+08:00",
-  "li": -0.0003,
-  "ri": 0.0394,
+  "timestamp_cn": "2026-06-25T14:12:45.789860+08:00",
+  "li": -0.0004,
+  "ri": 0.0396,
   "state": "S4",
-  "transition_probability": 1.59,
+  "transition_probability": 1.61,
   "portfolio": {
     "Stocks": "0%",
     "BTC": "0%",
